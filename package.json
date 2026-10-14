@@ -1,0 +1,9 @@
+{
+  "name": "webbuilder",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Tizon Health website spec builder with AI site generation",
+  "dependencies": {
+    "@netlify/blobs": "^8.1.0"
+  }
+}

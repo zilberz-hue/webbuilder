@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Tizon Health — בונה אפיון אתרים</title>
+<link rel="icon" href="logo.png">
+<link rel="stylesheet" href="spec-builder.css">
+</head>
+<body>
+<header class="top">
+  <div class="brand"><img src="logo.png" alt="Tizon Health"><div>בונה אפיון אתרים<small>The Architecture of Vitality</small></div></div>
+  <div class="actions">
+    <button id="btnSample" class="ghost">טען דוגמה</button>
+    <button id="btnImport" class="ghost">ייבוא JSON</button>
+    <button id="btnJson" class="ghost">ייצוא JSON</button>
+    <button id="btnMd" class="ghost">הורד Markdown</button>
+    <button id="btnBuild" class="build">✨ בנה אתר</button>
+    <button id="btnPrint" class="primary">הדפס / PDF</button>
+    <button id="btnReset" class="danger">נקה</button>
+    <input type="file" id="fileIn" accept=".json" hidden>
+  </div>
+</header>
+<div class="layout">
+  <nav id="nav" aria-label="שלבים"></nav>
+  <main id="editor"></main>
+  <aside id="preview" aria-label="תצוגה מקדימה"></aside>
+</div>
+<script src="spec-builder.js"></script>
+<script src="site-gen.js"></script>
+</body>
+</html>
