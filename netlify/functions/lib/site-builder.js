@@ -20,6 +20,7 @@ Output rules (strict):
 - Honour the spec: site name, languages (RTL for Hebrew/Arabic with dir and lang set correctly; if several languages are listed add a working language switch for the key texts), brand tone, colors, fonts, page purposes and content, features, legal pages and integrations (render integrations as clearly marked placeholders, e.g. a contact form that validates and shows a success message, with a comment where to connect the real endpoint).
 - Write real, specific copy in the spec's main language based on what the spec says. Never leave lorem ipsum or "TODO". If the spec is thin, make sensible, honest choices and keep claims modest (no invented prices, statistics, certifications or testimonials presented as real; health-related sites must not make medical claims).
 - Quality bar: responsive from 360px up, semantic HTML, WCAG AA contrast, visible focus states, keyboard-operable menus, prefers-reduced-motion respected, meta title/description, Open Graph tags, fast (no heavy libraries).
+- Keep the document lean: one shared stylesheet with reusable classes and CSS variables, one small script, no repeated markup or inline styles per element, no comments beyond what helps a developer; every page complete but concise.
 - Visual design should feel custom and premium: a considered type scale, generous spacing, consistent components, subtle motion. Do not produce a generic template look.
 - Uploaded assets: the user may provide files, each listed with an id, a role and a note.
   * role "לוגו" or "תמונה לשימוש באתר": embed it in the site with src="{{ASSET:<id>}}" exactly (the system substitutes the real image afterwards). Use logos in the header/footer and favicon (<link rel="icon" href="{{ASSET:<id>}}">), and use content images where the note or page purpose says. Never invent other image URLs; add meaningful alt text and sensible width/height or aspect-ratio so layout does not jump.
@@ -99,19 +100,55 @@ function extractHtml(text) {
   return t;
 }
 
+/* Streamed: a whole multi-page site is long, and Opus 5.5 always thinks first, so the thinking and the HTML share
+   one max_tokens. 32000 without streaming ran out on an 8-page spec ("too large to finish"); streaming lets the
+   request hold 64000 without an HTTP timeout. A background function has 15 minutes: past ~13.5 the read stops
+   with a clear message instead of being killed mid-way. */
+const MAX_TOKENS = 64000, TIME_LIMIT_MS = 13.5 * 60 * 1000;
+
+async function readStream(res, started) {
+  const reader = res.body.getReader(), dec = new TextDecoder();
+  let buf = "", text = "", stop = null, timedOut = false;
+  for (;;) {
+    if (Date.now() - started > TIME_LIMIT_MS) { timedOut = true; await reader.cancel().catch(() => {}); break; }
+    const { done, value } = await reader.read();
+    if (done) break;
+    buf += dec.decode(value, { stream: true });
+    let i;
+    while ((i = buf.indexOf("\n\n")) > -1) {
+      const chunk = buf.slice(0, i); buf = buf.slice(i + 2);
+      const line = chunk.split("\n").find((l) => l.startsWith("data:"));
+      if (!line) continue;
+      let ev; try { ev = JSON.parse(line.slice(5)); } catch (e) { continue; }
+      if (ev.type === "content_block_delta" && ev.delta && ev.delta.type === "text_delta") text += ev.delta.text;
+      else if (ev.type === "message_delta" && ev.delta && ev.delta.stop_reason) stop = ev.delta.stop_reason;
+      else if (ev.type === "error") throw new Error("Anthropic API stream error: " + ((ev.error && ev.error.message) || "unknown"));
+    }
+  }
+  return { text, stop, timedOut };
+}
+
 async function callClaude({ spec, instruction, html, assets }, fetchImpl) {
   const key = process.env.ANTHROPIC_API_KEY;
   if (!key) throw new Error("ANTHROPIC_API_KEY is not set in Netlify (Site settings → Environment variables)");
+  const started = Date.now();
   const res = await (fetchImpl || fetch)("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: { "content-type": "application/json", "x-api-key": key, "anthropic-version": "2023-06-01" },
-    body: JSON.stringify({ model: MODEL(), max_tokens: 32000, system: SYSTEM, messages: buildMessages({ spec, instruction, html, assets }) }),
+    body: JSON.stringify({ model: MODEL(), max_tokens: MAX_TOKENS, stream: true, output_config: { effort: "medium" },
+      system: SYSTEM, messages: buildMessages({ spec, instruction, html, assets }) }),
   });
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error("Anthropic API " + res.status + ": " + ((data.error && data.error.message) || "request failed"));
-  const text = (data.content || []).map((b) => b.text || "").join("");
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error("Anthropic API " + res.status + ": " + ((data.error && data.error.message) || "request failed"));
+  }
+  const { text, stop, timedOut } = await readStream(res, started);
   const out = extractHtml(text);
-  if (!out) throw new Error(data.stop_reason === "max_tokens" ? "The site was too large to finish — try a smaller spec or ask for fewer pages" : "The model did not return a valid HTML document");
+  if (!out) {
+    if (timedOut) throw new Error("The site took longer than the 15 minutes a build may run — try fewer pages, or build it in two steps");
+    if (stop === "refusal") throw new Error("The model declined this request");
+    throw new Error(stop === "max_tokens" ? "The site was too large to finish — try a smaller spec or ask for fewer pages" : "The model did not return a valid HTML document");
+  }
   return out;
 }
 
