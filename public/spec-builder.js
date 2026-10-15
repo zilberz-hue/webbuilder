@@ -32,6 +32,8 @@ var SECTIONS=[
   {k:'refs',l:'אתרי השראה / מתחרים',t:'area'},
   {k:'a11y',l:'נגישות',t:'select',o:['WCAG 2.1 AA (תקן ישראלי 5568)','WCAG 2.2 AA','בסיסית','לא נדרש']},
   {k:'responsive',l:'התאמה למכשירים',t:'chips',o:['מובייל','טאבלט','דסקטופ','הדפסה']}]},
+ {id:'assets',title:'קבצים ותמונות',hint:'לוגו, תמונות לשימוש באתר, צילומי מסך של אתרי השראה ומסמכי רקע. הם נכללים באפיון, וה-AI משתמש בהם בבניית האתר.',fields:[
+  {k:'assets',l:'קבצים',t:'assets'}]},
  {id:'tech',title:'טכנולוגיה ואינטגרציות',hint:'בחירות טכניות ושירותים חיצוניים.',fields:[
   {k:'stack',l:'טכנולוגיה / פלטפורמה',t:'text',p:'React + Node, WordPress, Webflow, אתר סטטי...'},
   {k:'hosting',l:'אחסון ודומיין',t:'text'},
@@ -62,12 +64,21 @@ function secDone(s){return s.fields.some(function(f){return filled(state[f.k])})
 
 // ---- Rendering: navigation
 function renderNav(){
-  var done=SECTIONS.filter(secDone).length;
-  var h='<div class="prog"><i style="width:'+Math.round(done/SECTIONS.length*100)+'%"></i></div>';
+  var nav=$('#nav'),done=SECTIONS.filter(secDone).length,pct=Math.round(done/SECTIONS.length*100)+'%';
+  /* update in place once built: replacing the buttons on every keystroke/blur
+     swallowed the first click on a step after typing in a field */
+  if(nav.querySelectorAll('button').length===SECTIONS.length){
+    nav.querySelector('.prog i').style.width=pct;
+    Array.prototype.forEach.call(nav.querySelectorAll('button'),function(b,i){
+      b.className=i===cur?'on':'';b.querySelector('.dot').className='dot'+(secDone(SECTIONS[i])?' done':'');
+    });
+    return;
+  }
+  var h='<div class="prog"><i style="width:'+pct+'"></i></div>';
   SECTIONS.forEach(function(s,i){
     h+='<button data-i="'+i+'" class="'+(i===cur?'on':'')+'"><span>'+(i+1)+'. '+esc(s.title)+'</span><span class="dot'+(secDone(s)?' done':'')+'"></span></button>';
   });
-  $('#nav').innerHTML=h;
+  nav.innerHTML=h;
 }
 
 // ---- Rendering: editor
@@ -85,6 +96,7 @@ function renderEditor(){
   var s=SECTIONS[cur];
   var h='<h2>'+(cur+1)+'. '+esc(s.title)+'</h2><p class="hint">'+esc(s.hint)+'</p>';
   s.fields.forEach(function(f){
+    if(f.t==='assets'){h+=assetsHtml(f);return}
     if(f.t!=='list'){h+=fieldHtml(f,state[f.k],f.k);return}
     h+='<label>'+esc(f.l)+'</label>';
     var arr=state[f.k]||[];
@@ -99,6 +111,7 @@ function renderEditor(){
   });
   h+='<div class="step-nav"><button data-go="-1"'+(cur===0?' disabled':'')+'>→ הקודם</button><button class="primary" data-go="1"'+(cur===SECTIONS.length-1?' disabled':'')+'>הבא ←</button></div>';
   $('#editor').innerHTML=h;
+  hydrateThumbs();
 }
 
 // ---- Preview + Markdown
@@ -128,7 +141,8 @@ function buildDoc(){
             if(it.content)b.push({p:it.content});if(it.d)b.push({p:it.d});
           });
         }
-      }else if(f.t==='chips'){b.push({h3:f.l});b.push({ul:v})}
+      }else if(f.t==='assets'){b.push({h3:f.l});b.push({table:[['קובץ','תפקיד','הערה']].concat(v.map(function(a){return [a.name,a.role||'',a.note||'']}))})}
+      else if(f.t==='chips'){b.push({h3:f.l});b.push({ul:v})}
       else if(f.t==='area'&&lines(v).length>1){b.push({h3:f.l});b.push({ul:lines(v)})}
       else{b.push({h3:f.l});b.push({p:v})}
     });
@@ -175,30 +189,120 @@ document.addEventListener('input',function(e){
 });
 document.addEventListener('change',function(e){
   var t=e.target;
+  if(t.id==='pick'){addFiles(t.files);t.value='';return}
   if(t.dataset&&t.dataset.c){var a=(state[t.dataset.c]||[]).slice(),i=a.indexOf(t.value);if(t.checked&&i<0)a.push(t.value);if(!t.checked&&i>-1)a.splice(i,1);state[t.dataset.c]=a;refresh(false)}
   else if(t.dataset&&t.dataset.p){setPath(t.dataset.p,t.value);refresh(false)}
 });
 document.addEventListener('click',function(e){
   var t=e.target.closest('button');if(!t)return;
+  if(t.dataset.pick){var pk=$('#pick');if(pk)pk.click();return}
   if(t.parentNode.id==='nav'){cur=+t.dataset.i;renderNav();renderEditor();return}
   if(t.dataset.go){cur=Math.max(0,Math.min(SECTIONS.length-1,cur+ +t.dataset.go));renderNav();renderEditor();window.scrollTo(0,0);return}
   if(t.dataset.add){(state[t.dataset.add]=state[t.dataset.add]||[]).push({});refresh(true);return}
-  if(t.dataset.del){var p=t.dataset.del.split(':');state[p[0]].splice(+p[1],1);refresh(true)}
+  if(t.dataset.del){var p=t.dataset.del.split(':');if(p[0]==='assets'&&state.assets[+p[1]])fdel(state.assets[+p[1]].id);state[p[0]].splice(+p[1],1);refresh(true)}
 });
+
+document.addEventListener('dragover',function(e){var d=e.target.closest&&e.target.closest('#drop');if(d){e.preventDefault();d.classList.add('over')}});
+document.addEventListener('dragleave',function(e){var d=e.target.closest&&e.target.closest('#drop');if(d)d.classList.remove('over')});
+document.addEventListener('drop',function(e){var d=e.target.closest&&e.target.closest('#drop');if(d){e.preventDefault();d.classList.remove('over');addFiles(e.dataTransfer.files)}});
+
+// ---- Uploaded files (images / PDF / text). Metadata lives in state.assets;
+// the file bytes (data URLs) live in IndexedDB so localStorage is never overfilled.
+var ASSET_ROLES=['תמונה לשימוש באתר','לוגו','השראה / עיצוב לדוגמה','מסמך / חומר רקע'];
+var MAX_FILES=12, MEM={}, DBP=null;
+function idb(){
+  if(DBP)return DBP;
+  DBP=new Promise(function(res,rej){
+    if(!window.indexedDB)return rej(new Error('no idb'));
+    var r=indexedDB.open('specBuilderFiles',1);
+    r.onupgradeneeded=function(){r.result.createObjectStore('f')};
+    r.onsuccess=function(){res(r.result)};r.onerror=function(){rej(r.error)};
+  });
+  return DBP;
+}
+function tx(mode,fn){return idb().then(function(db){return new Promise(function(res,rej){var t=db.transaction('f',mode),rq=fn(t.objectStore('f'));t.oncomplete=function(){res(rq&&rq.result)};t.onerror=function(){rej(t.error)}})})}
+function fput(id,v){MEM[id]=v;return tx('readwrite',function(o){return o.put(v,id)}).catch(function(){})}
+function fget(id){if(MEM[id])return Promise.resolve(MEM[id]);return tx('readonly',function(o){return o.get(id)}).then(function(v){if(v)MEM[id]=v;return v||null}).catch(function(){return null})}
+function fdel(id){delete MEM[id];return tx('readwrite',function(o){return o.delete(id)}).catch(function(){})}
+function fclear(){MEM={};return tx('readwrite',function(o){return o.clear()}).catch(function(){})}
+function isImg(m){return /^image\//.test(m||'')}
+function fmtSize(n){return n>1048576?(n/1048576).toFixed(1)+' MB':Math.max(1,Math.round(n/1024))+' KB'}
+function newId(){var a=new Uint8Array(6);crypto.getRandomValues(a);return Array.prototype.map.call(a,function(x){return x.toString(16).padStart(2,'0')}).join('')}
+
+function assetsHtml(f){
+  var arr=state[f.k]||[];
+  var h='<label>'+esc(f.l)+'</label><div class="drop" id="drop"><div>📎 גררו לכאן תמונות וקבצים (תמונה, PDF, TXT, MD)</div><button type="button" data-pick="1">בחירת קבצים</button><input type="file" id="pick" multiple accept="image/*,.pdf,.txt,.md" hidden></div><div id="upmsg" class="hint"></div>';
+  arr.forEach(function(a,i){
+    h+='<div class="item"><div class="head"><b>'+esc(a.name)+' · '+fmtSize(a.size||0)+'</b><button data-del="assets:'+i+'">מחק</button></div><div class="arow"><div class="th">'+(isImg(a.mime)?'<img data-th="'+esc(a.id)+'" alt="">':'<span>📄</span>')+'</div><div class="afields">'+
+      fieldHtml({l:'תפקיד הקובץ',t:'select',o:ASSET_ROLES},a.role,'assets.'+i+'.role')+
+      fieldHtml({l:'הערה (איפה להשתמש, מה לשים לב)',t:'text'},a.note,'assets.'+i+'.note')+'</div></div></div>';
+  });
+  return h;
+}
+function hydrateThumbs(){
+  Array.prototype.forEach.call(document.querySelectorAll('img[data-th]'),function(im){fget(im.dataset.th).then(function(u){if(u)im.src=u})});
+}
+function upmsg(t){var m=$('#upmsg');if(m)m.textContent=t||''}
+function readAs(file,how){return new Promise(function(res,rej){var r=new FileReader();r.onload=function(){res(r.result)};r.onerror=function(){rej(r.error)};r[how](file)})}
+function shrinkImage(file){
+  var keep=file.type==='image/svg+xml'||file.type==='image/gif';
+  if(keep){if(file.size>1.5*1048576)return Promise.reject(new Error('גדול מדי'));return readAs(file,'readAsDataURL')}
+  return readAs(file,'readAsDataURL').then(function(url){return new Promise(function(res,rej){
+    var im=new Image();im.onerror=function(){rej(new Error('תמונה לא תקינה'))};
+    im.onload=function(){
+      var k=Math.min(1,1600/Math.max(im.width,im.height)),w=Math.round(im.width*k),h=Math.round(im.height*k);
+      var c=document.createElement('canvas');c.width=w;c.height=h;var g=c.getContext('2d');
+      var out=null;
+      if(file.type==='image/png'){g.drawImage(im,0,0,w,h);out=c.toDataURL('image/png');if(out.length>1.4*1048576)out=null}
+      if(!out){g.fillStyle='#fff';g.fillRect(0,0,w,h);g.drawImage(im,0,0,w,h);var q=.88;out=c.toDataURL('image/jpeg',q);while(out.length>1.4*1048576&&q>.4){q-=.12;out=c.toDataURL('image/jpeg',q)}}
+      res(out);
+    };
+    im.src=url;
+  })});
+}
+function addFiles(list){
+  var files=Array.prototype.slice.call(list||[]);if(!files.length)return;
+  var arr=state.assets=state.assets||[],msgs=[];
+  var chain=Promise.resolve();
+  files.forEach(function(f){
+    chain=chain.then(function(){
+      if(arr.length>=MAX_FILES){msgs.push(f.name+': הגעת למקסימום '+MAX_FILES+' קבצים');return}
+      var name=f.name,ext=(name.split('.').pop()||'').toLowerCase(),p,mime=f.type;
+      if(isImg(f.type)){p=shrinkImage(f)}
+      else if(f.type==='application/pdf'||ext==='pdf'){mime='application/pdf';if(f.size>3.5*1048576){msgs.push(name+': PDF גדול מדי (עד 3.5MB)');return}p=readAs(f,'readAsDataURL')}
+      else if(f.type==='text/plain'||ext==='txt'||ext==='md'){mime=ext==='md'?'text/markdown':'text/plain';if(f.size>200*1024){msgs.push(name+': קובץ טקסט גדול מדי (עד 200KB)');return}p=readAs(f,'readAsDataURL')}
+      else{msgs.push(name+': סוג קובץ לא נתמך');return}
+      return p.then(function(url){
+        if(url.indexOf('data:')!==0)throw new Error('קריאה נכשלה');
+        if(!isImg(mime))url=url.replace(/^data:[^;,]*/,'data:'+mime);
+        var m=/^data:([^;,]+)/.exec(url);if(m&&isImg(mime))mime=m[1];
+        var id=newId();
+        return fput(id,url).then(function(){arr.push({id:id,name:name,mime:mime,size:Math.round(url.length*3/4),role:isImg(mime)?'תמונה לשימוש באתר':'מסמך / חומר רקע',note:''})});
+      }).catch(function(e){msgs.push(name+': '+(e.message||'שגיאה'))});
+    });
+  });
+  chain.then(function(){refresh(true);if(msgs.length)upmsg(msgs.join(' · '))});
+}
 
 // ---- Toolbar
 function download(name,text,mime){var a=document.createElement('a');a.href=URL.createObjectURL(new Blob([text],{type:mime}));a.download=name;document.body.appendChild(a);a.click();a.remove();setTimeout(function(){URL.revokeObjectURL(a.href)},500)}
 function fname(){return (state.name||'website-spec').replace(/[^\w֐-׿-]+/g,'_')}
 $('#btnMd').onclick=function(){download(fname()+'.md',toMd(buildDoc()),'text/markdown')};
-$('#btnJson').onclick=function(){download(fname()+'.json',JSON.stringify(state,null,2),'application/json')};
+$('#btnJson').onclick=function(){
+  var out=JSON.parse(JSON.stringify(state)),ids=(state.assets||[]).map(function(a){return a.id});
+  Promise.all(ids.map(fget)).then(function(urls){
+    if(ids.length){out._files={};ids.forEach(function(id,i){if(urls[i])out._files[id]=urls[i]})}
+    download(fname()+'.json',JSON.stringify(out,null,2),'application/json');
+  });
+};
 $('#btnPrint').onclick=function(){window.print()};
 $('#btnImport').onclick=function(){$('#fileIn').click()};
 $('#fileIn').onchange=function(e){
   var f=e.target.files[0];if(!f)return;var r=new FileReader();
-  r.onload=function(){try{var o=JSON.parse(r.result);if(!o||typeof o!=='object'||Array.isArray(o))throw 0;state=o;refresh(true)}catch(x){alert('קובץ JSON לא תקין')}};
+  r.onload=function(){try{var o=JSON.parse(r.result);if(!o||typeof o!=='object'||Array.isArray(o))throw 0;var fl=o._files;delete o._files;state=o;(fl?Promise.all(Object.keys(fl).map(function(id){return fput(id,fl[id])})):Promise.resolve()).then(function(){refresh(true)})}catch(x){alert('קובץ JSON לא תקין')}};
   r.readAsText(f);e.target.value='';
 };
-$('#btnReset').onclick=function(){if(confirm('למחוק את כל האפיון?')){state={};cur=0;refresh(true)}};
+$('#btnReset').onclick=function(){if(confirm('למחוק את כל האפיון?')){state={};cur=0;fclear();refresh(true)}};
 $('#btnSample').onclick=function(){
   if(Object.keys(state).length&&!confirm('טעינת הדוגמה תחליף את התוכן הנוכחי. להמשיך?'))return;
   state=SAMPLE();cur=0;refresh(true);
@@ -220,6 +324,6 @@ function SAMPLE(){return {
  phases:[{n:'אפיון ועיצוב',dur:'3 שבועות',out:'מסמך אפיון + מוקאפים'},{n:'פיתוח',dur:'5 שבועות',out:'אתר בסביבת בדיקות'},{n:'בדיקות והשקה',dur:'שבועיים',out:'אתר חי'}],
  budget:'35,000–45,000 ₪',launch:'תחילת הרבעון הבא',risks:'עיכוב בתוכן מהלקוח\nשינויי דרישות באמצע פיתוח',outscope:'אפליקציית מובייל\nמערכת חברות מועדון'};}
 
-window.SpecBuilder={getSpec:function(){return JSON.parse(JSON.stringify(state))},hasContent:function(){return Object.keys(state).some(function(k){return filled(state[k])})}};
+window.SpecBuilder={getSpec:function(){return JSON.parse(JSON.stringify(state))},getFile:fget,hasContent:function(){return Object.keys(state).some(function(k){return filled(state[k])})}};
 renderNav();renderEditor();renderPreview();
 })();

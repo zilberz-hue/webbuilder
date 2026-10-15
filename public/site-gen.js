@@ -25,14 +25,17 @@ root.innerHTML=
 document.body.appendChild(root);
 
 var $=function(s){return root.querySelector(s)}, frame=$('iframe'), log=$('.log'), ta=$('textarea');
-var versions=[], busy=false, timer=null;
+var versions=[], busy=false, timer=null, sid=rid(), sent={}, urls={};
 $('#gBase').value=ls('sb.server')||DEFAULT_BASE;$('#gKey').value=ls('sb.key')||'';
 $('#gBase').oninput=function(){ls('sb.server',this.value)};$('#gKey').oninput=function(){ls('sb.key',this.value)};
 
 function say(t,c){var d=document.createElement('div');d.className='msg '+(c||'');d.textContent=t;log.appendChild(d);log.scrollTop=log.scrollHeight}
 function base(){var b=($('#gBase').value||DEFAULT_BASE).trim();return b.slice(-1)==='/'?b:b+'/'}
 function cur(){return versions[versions.length-1]||null}
-function show(){var h=cur();frame.srcdoc=h||'';['undo','dl','open'].forEach(function(a){root.querySelector('[data-a='+a+']').disabled=!h||(a==='undo'&&versions.length<2)})}
+/* versions keep {{ASSET:id}} tokens (small, and cheap to send back for edits);
+   the real data URLs are substituted only for display / download */
+function real(h){return h?h.replace(/\{\{ASSET:([A-Za-z0-9_-]+)\}\}/g,function(m,id){return urls[id]||''}):h}
+function show(){var h=cur();frame.srcdoc=real(h)||'';['undo','dl','open'].forEach(function(a){root.querySelector('[data-a='+a+']').disabled=!h||(a==='undo'&&versions.length<2)})}
 function overlay(on,t){var o=$('.overlay');o.classList.toggle('on',on);if(t)$('.otxt').textContent=t}
 
 function run(instruction){
@@ -42,9 +45,31 @@ function run(instruction){
   overlay(true,'בונה את האתר…');
   clearInterval(timer);timer=setInterval(function(){$('.otxt').textContent=(html?'מעדכן':'בונה')+' את האתר… '+Math.round((Date.now()-t0)/1000)+' שניות'},1000);
   var done=function(){busy=false;clearInterval(timer);overlay(false)};
-  fetch(base()+'site-builder-background',{method:'POST',mode:'no-cors',headers:{'content-type':'text/plain'},
-    body:JSON.stringify({id:id,key:key||undefined,spec:spec,instruction:instruction||undefined,html:html||undefined})
-  }).then(function(){poll(id,key,t0,done)}).catch(function(){done();say('לא הצלחתי להגיע לשרת. בדוק את כתובת הפונקציות בהגדרות.','err')});
+  uploadAssets(spec.assets||[],key).then(function(){
+    overlay(true,(html?'מעדכן':'בונה')+' את האתר…');
+    return fetch(base()+'site-builder-background',{method:'POST',mode:'no-cors',headers:{'content-type':'text/plain'},
+      body:JSON.stringify({id:id,sid:sid,key:key||undefined,spec:spec,instruction:instruction||undefined,html:html||undefined})
+    })
+  }).then(function(){poll(id,key,t0,done)}).catch(function(e){done();say(e&&/^העלאת/.test(e.message)?e.message:'לא הצלחתי להגיע לשרת. בדוק את כתובת הפונקציות בהגדרות.','err')});
+}
+/* upload each file once per page load; the builder reads them from the server by sid/id */
+function uploadAssets(list,key){
+  var chain=Promise.resolve(),n=0;
+  list.forEach(function(a){
+    chain=chain.then(function(){
+      return window.SpecBuilder.getFile(a.id).then(function(url){
+        if(!url)return;
+        urls[a.id]=url;
+        if(sent[a.id])return;
+        $('.otxt').textContent='מעלה קבצים… ('+(++n)+'/'+list.length+')';
+        return fetch(base()+'site-assets',{method:'POST',headers:{'content-type':'text/plain'},body:JSON.stringify({key:key||undefined,sid:sid,id:a.id,dataUrl:url})})
+          .then(function(r){return r.json().catch(function(){return {}}).then(function(j){
+            if(!r.ok||!j.ok)throw new Error('העלאת '+a.name+' נכשלה: '+(j.error||r.status));
+            sent[a.id]=1})});
+      });
+    });
+  });
+  return chain;
 }
 function poll(id,key,t0,done){
   if(Date.now()-t0>14*60*1000){done();say('הבנייה לוקחת יותר מדי זמן. נסה שוב.','err');return}
@@ -67,8 +92,8 @@ root.addEventListener('click',function(e){
   else if(a==='send')send();
   else if(a==='device')frame.classList.toggle('mobile');
   else if(a==='undo'&&versions.length>1){versions.pop();show();say('חזרתי לגרסה הקודמת.')}
-  else if(a==='dl'&&cur()){var l=document.createElement('a');l.href=URL.createObjectURL(new Blob([cur()],{type:'text/html'}));l.download='index.html';document.body.appendChild(l);l.click();l.remove()}
-  else if(a==='open'&&cur()){var w=window.open();if(w){w.document.open();w.document.write(cur());w.document.close()}}
+  else if(a==='dl'&&cur()){var l=document.createElement('a');l.href=URL.createObjectURL(new Blob([real(cur())],{type:'text/html'}));l.download='index.html';document.body.appendChild(l);l.click();l.remove()}
+  else if(a==='open'&&cur()){var w=window.open();if(w){w.document.open();w.document.write(real(cur()));w.document.close()}}
 });
 ta.addEventListener('keydown',function(e){if(e.key==='Enter'&&(e.ctrlKey||e.metaKey))send()});
 
